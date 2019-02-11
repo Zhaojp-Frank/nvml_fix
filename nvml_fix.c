@@ -1,4 +1,18 @@
 #include <dlfcn.h>
+#include <stdio.h>
+#include <string.h>
+
+/////////////////color: printf(RED""NONE,va1);
+#define NONE                 "\e[0m"
+#define RED                  "\e[0;31m"
+#define GREEN                "\e[0;32m"
+#define LGREEN               "\e[1;32m"
+#define YELLOW               "\e[1;33m"
+#define BLUE                 "\e[0;34m"
+#define LBLUE                "\e[1;34m"
+#define MAG										"\e[0;35m"
+#define CYAN									"\e[0;36m"
+#define WHITE                "\e[1;37m"
 
 #if defined(NVML_PATCH_319) || defined(NVML_PATCH_325) || defined(NVML_PATCH_331)
 #include "nvml.h"
@@ -24,11 +38,16 @@ FUNC(nvmlDeviceGetHandleBySerial)
 FUNC(nvmlDeviceGetHandleByUUID)
 FUNC_v2(nvmlDeviceGetHandleByPciBusId)
 
+///////////////////frank: step1. declare func ptr here ONLY IF customized needed
+FUNC(nvmlDeviceGetName);
+FUNC_v2(nvmlDeviceGetCount);
+
+///////////////////////////////////////////////////////////////////////
 #define LOAD(f) if (!(real_##f = dlsym(nvml, #f))) return NVML_ERROR_UNKNOWN
 #if defined(NVML_PATCH_319) || defined(NVML_PATCH_325) || defined(NVML_PATCH_331)
 #define INIT(name) nvmlReturn_t name() \
 { \
-	void *nvml = dlopen("libnvidia-ml.so." NVML_VERSION, RTLD_NOW); \
+	void *nvml = dlopen("/usr/lib/x86_64-linux-gnu/libnvidia-ml.so." NVML_VERSION, RTLD_NOW); \
 \
 	LOAD(nvmlInit); \
 	LOAD(nvmlInit_v2); \
@@ -44,7 +63,7 @@ FUNC_v2(nvmlDeviceGetHandleByPciBusId)
 #elif defined(NVML_PATCH_390) || defined(NVML_PATCH_396) || defined(NVML_PATCH_410)
 #define INIT(name) nvmlReturn_t name() \
 { \
-void *nvml = dlopen("libnvidia-ml.so." NVML_VERSION, RTLD_NOW); \
+void *nvml = dlopen("/usr/lib/x86_64-linux-gnu/libnvidia-ml.so." NVML_VERSION, RTLD_NOW); \
 \
 	LOAD(nvmlInit_v2); \
 	LOAD(nvmlInitWithFlags); \
@@ -53,6 +72,8 @@ void *nvml = dlopen("libnvidia-ml.so." NVML_VERSION, RTLD_NOW); \
 	LOAD(nvmlDeviceGetHandleByUUID); \
 	LOAD(nvmlDeviceGetHandleByPciBusId_v2); \
 \
+  /*//////////////////frank: 2.1 set customized func ptr here (optional? as nvmlInit_v2 would call nvmlInitWithFlags */ \
+	printf("shim-%s....11\n", __FUNCTION__); \
 	return real_##name(); \
 }
 #endif
@@ -64,8 +85,7 @@ INIT(nvmlInit_v2)
 
 #if defined(NVML_PATCH_390) || defined(NVML_PATCH_396) || defined(NVML_PATCH_410)
 nvmlReturn_t nvmlInitWithFlags(unsigned int flags) {
-	void *nvml = dlopen("libnvidia-ml.so." NVML_VERSION, RTLD_NOW);
-
+	void *nvml = dlopen("/usr/lib/x86_64-linux-gnu/libnvidia-ml.so." NVML_VERSION, RTLD_NOW);
 	LOAD(nvmlInit_v2);
 	LOAD(nvmlInitWithFlags);
 	LOAD(nvmlDeviceGetHandleByIndex_v2);
@@ -73,7 +93,24 @@ nvmlReturn_t nvmlInitWithFlags(unsigned int flags) {
 	LOAD(nvmlDeviceGetHandleByUUID);
 	LOAD(nvmlDeviceGetHandleByPciBusId_v2);
 
-	return real_nvmlInitWithFlags(flags);
+  //////////////////frank: Step2.2, set func ptr here for customized func ptr here
+	printf(RED"Frank load customized NVML .... done!\n"NONE, __FUNCTION__);fflush(stdout);
+	LOAD(nvmlDeviceGetCount_v2);
+	LOAD(nvmlDeviceGetName);
+
+
+	//return real_nvmlInitWithFlags(flags);
+	real_nvmlInitWithFlags(flags);
+
+	///////////test
+	unsigned int cnt;
+	real_nvmlDeviceGetCount_v2(&cnt);
+  nvmlDevice_t device;
+	char name[64];
+  real_nvmlDeviceGetHandleByIndex_v2(0, &device);
+	real_nvmlDeviceGetName(device, name, 64);
+	printf(BLUE"pGPUCnt:%d name:%s -> customize as vGPU 1060\n\n"NONE, cnt, name);fflush(stdout);
+	return NVML_SUCCESS; 
 }
 #endif
 
@@ -136,3 +173,23 @@ GET_HANDLE_BY(Index_v2, unsigned int)
 GET_HANDLE_BY(Serial, const char *)
 GET_HANDLE_BY(UUID, const char *)
 GET_HANDLE_BY(PciBusId_v2, const char *)
+
+
+//////////////////frank: step3: customize any func ONLY IF needed here 
+nvmlReturn_t DECLDIR nvmlDeviceGetCount_v2(unsigned int *deviceCount)
+{
+	real_nvmlDeviceGetCount_v2(deviceCount);
+	//printf("->pGPUCnt:%d \n", *deviceCount);
+	//*deviceCount = 4;
+	return NVML_SUCCESS; 
+}
+
+nvmlReturn_t DECLDIR nvmlDeviceGetName(nvmlDevice_t device, char *name, unsigned int length) 
+{
+	unsigned int cnt;
+	real_nvmlDeviceGetCount_v2(&cnt);
+	real_nvmlDeviceGetName(device, name, length);
+	//printf(BLUE" pGPUCnt:%d name:%s -> customize as vGPU 1060\n"NONE, cnt, name);
+	strcpy(name, "Frank-vGPU 1060 Max-Q");
+	return NVML_SUCCESS; 
+}
